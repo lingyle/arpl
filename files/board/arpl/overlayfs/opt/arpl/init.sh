@@ -37,6 +37,7 @@ fsck.ext2 -p ${LOADER_DISK}3 >/dev/null 2>&1 || true
 mkdir -p ${BOOTLOADER_PATH}
 mkdir -p ${SLPART_PATH}
 mkdir -p ${CACHE_PATH}
+mkdir -p ${DSMROOT_PATH}
 # Mount the partitions
 mount ${LOADER_DISK}1 ${BOOTLOADER_PATH} || die "Can't mount ${BOOTLOADER_PATH}"
 mount ${LOADER_DISK}2 ${SLPART_PATH}     || die "Can't mount ${SLPART_PATH}"
@@ -49,6 +50,20 @@ ln -s "${CACHE_PATH}/ssh" "/etc/ssh"
 # Link bash history to cache volume
 rm -rf ~/.bash_history
 ln -s ${CACHE_PATH}/.bash_history ~/.bash_history
+touch ~/.bash_history
+if ! grep -q "menu.sh" ~/.bash_history; then
+  echo "menu.sh " >> ~/.bash_history
+fi
+# Check if exists directories into P3 partition, if yes remove and link it
+if [ -d "${CACHE_PATH}/model-configs" ]; then
+  rm -rf "${MODEL_CONFIG_PATH}"
+  ln -s "${CACHE_PATH}/model-configs" "${MODEL_CONFIG_PATH}"
+fi
+
+if [ -d "${CACHE_PATH}/patch" ]; then
+  rm -rf "${PATCH_PATH}"
+  ln -s "${CACHE_PATH}/patch" "${PATCH_PATH}"
+fi
 
 # Get first MAC address
 MAC=`ip link show eth0 | awk '/ether/{print$2}'`
@@ -57,11 +72,12 @@ MACF=`echo ${MAC} | sed 's/://g'`
 # If user config file not exists, initialize it
 if [ ! -f "${USER_CONFIG_FILE}" ]; then
   touch "${USER_CONFIG_FILE}"
-  writeConfigKey "lkm" "dev" "${USER_CONFIG_FILE}"
+  writeConfigKey "lkm" "prod" "${USER_CONFIG_FILE}"
+  writeConfigKey "directboot" "false" "${USER_CONFIG_FILE}"
   writeConfigKey "model" "" "${USER_CONFIG_FILE}"
   writeConfigKey "build" "" "${USER_CONFIG_FILE}"
   writeConfigKey "sn" "" "${USER_CONFIG_FILE}"
-  writeConfigKey "maxdisks" "" "${USER_CONFIG_FILE}"
+#  writeConfigKey "maxdisks" "" "${USER_CONFIG_FILE}"
   writeConfigKey "layout" "qwerty" "${USER_CONFIG_FILE}"
   writeConfigKey "keymap" "" "${USER_CONFIG_FILE}"
   writeConfigKey "zimage-hash" "" "${USER_CONFIG_FILE}"
@@ -71,11 +87,12 @@ if [ ! -f "${USER_CONFIG_FILE}" ]; then
   writeConfigKey "addons" "{}" "${USER_CONFIG_FILE}"
   writeConfigKey "addons.misc" "" "${USER_CONFIG_FILE}"
   writeConfigKey "addons.acpid" "" "${USER_CONFIG_FILE}"
+  writeConfigKey "modules" "{}" "${USER_CONFIG_FILE}"
   # Initialize with real MAC
-  writeConfigKey "original-mac" "${MACF}" "${USER_CONFIG_FILE}"
   writeConfigKey "cmdline.netif_num" "1" "${USER_CONFIG_FILE}"
   writeConfigKey "cmdline.mac1" "${MACF}" "${USER_CONFIG_FILE}"
 fi
+writeConfigKey "original-mac" "${MACF}" "${USER_CONFIG_FILE}"
 
 # Set custom MAC if defined
 MAC1=`readConfigKey "cmdline.mac1" "${USER_CONFIG_FILE}"`
@@ -130,6 +147,9 @@ if [ -f /usr/share/keymaps/i386/${LAYOUT}/${KEYMAP}.map.gz ]; then
   zcat /usr/share/keymaps/i386/${LAYOUT}/${KEYMAP}.map.gz | loadkeys
 fi
 
+# Enable Wake on Lan, ignore errors
+ethtool -s eth0 wol g 2>/dev/null
+
 # Decide if boot automatically
 BOOT=1
 if ! loaderIsConfigured; then
@@ -141,13 +161,15 @@ elif grep -q "IWANTTOCHANGETHECONFIG" /proc/cmdline; then
 fi
 
 # If is to boot automatically, do it
-[ ${BOOT} -eq 1 ] && boot.sh
+if [ ${BOOT} -eq 1 ]; then 
+  boot.sh && exit 0
+fi
 
 # Wait for an IP
 COUNT=0
 echo -n "Waiting IP."
 while true; do
-  if [ ${COUNT} -eq 15 ]; then
+  if [ ${COUNT} -eq 30 ]; then
     echo "ERROR"
     break
   fi
@@ -169,16 +191,14 @@ echo -e "User config is on \033[1;32m${USER_CONFIG_FILE}\033[0m"
 echo -e "Default SSH Root password is \033[1;31mRedp1lL-1s-4weSomE\033[0m"
 echo
 
+# Check memory
+RAM=`free -m | awk '/Mem:/{print$2}'`
+if [ ${RAM} -le 3500 ]; then
+  echo -e "\033[1;33mYou have less than 4GB of RAM, if errors occur in loader creation, please increase the amount of memory.\033[0m\n"
+fi
+
 mkdir -p "${ADDONS_PATH}"
 mkdir -p "${LKM_PATH}"
 mkdir -p "${MODULES_PATH}"
 
-# Detect if has new local plugins to install/reinstall
-for F in `ls ${CACHE_PATH}/*.addon 2>/dev/null`; do
-  ADDON=`basename "${F}" | sed 's|.addon||'`
-  rm -rf "${ADDONS_PATH}/${ADDON}"
-  mkdir -p "${ADDONS_PATH}/${ADDON}"
-  echo "Installing ${F} to ${ADDONS_PATH}/${ADDON}"
-  tar xaf "${F}" -C "${ADDONS_PATH}/${ADDON}"
-  rm -f "${F}"
-done
+install-addons.sh

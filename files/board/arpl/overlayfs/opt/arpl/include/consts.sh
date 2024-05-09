@@ -1,5 +1,5 @@
 
-ARPL_VERSION="0.4-alpha3"
+ARPL_VERSION="1.1-beta2a"
 
 # Define paths
 TMP_PATH="/tmp"
@@ -8,6 +8,7 @@ RAMDISK_PATH="${TMP_PATH}/ramdisk"
 LOG_FILE="${TMP_PATH}/log.txt"
 
 USER_CONFIG_FILE="${BOOTLOADER_PATH}/user-config.yml"
+GRUB_PATH="${BOOTLOADER_PATH}/grub"
 
 ORI_ZIMAGE_FILE="${SLPART_PATH}/zImage"
 ORI_RDGZ_FILE="${SLPART_PATH}/rd.gz"
